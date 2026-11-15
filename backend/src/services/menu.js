@@ -12,19 +12,21 @@ function groupBy(rows, key) {
 
 // The whole menu as a tree: categories → items → options, plus each
 // category's sizes and add-ons. Five small queries, joined in memory.
+// (Postgres folds unquoted aliases to lower case, hence the quoted camelCase.)
 export async function getMenu(db = pool) {
-  const [[categories], [sizes], [addons], [items], [variants]] = await Promise.all([
+  const results = await Promise.all([
     db.query('SELECT id, slug, name, blurb, note, image, accent FROM categories ORDER BY sort_order, id'),
-    db.query('SELECT id, category_id, name, price_cents AS priceCents FROM category_sizes ORDER BY sort_order, id'),
-    db.query('SELECT id, category_id, name, price_cents AS priceCents FROM addons ORDER BY sort_order, id'),
+    db.query('SELECT id, category_id, name, price_cents AS "priceCents" FROM category_sizes ORDER BY sort_order, id'),
+    db.query('SELECT id, category_id, name, price_cents AS "priceCents" FROM addons ORDER BY sort_order, id'),
     db.query(
       `SELECT id, category_id, code, name, description, dietary,
-              base_price_cents AS basePriceCents, surcharge_cents AS surchargeCents,
+              base_price_cents AS "basePriceCents", surcharge_cents AS "surchargeCents",
               is_featured AS featured, is_available AS available
        FROM items ORDER BY sort_order, id`,
     ),
-    db.query('SELECT id, item_id, name, price_cents AS priceCents FROM item_variants ORDER BY sort_order, id'),
+    db.query('SELECT id, item_id, name, price_cents AS "priceCents" FROM item_variants ORDER BY sort_order, id'),
   ]);
+  const [categories, sizes, addons, items, variants] = results.map((result) => result.rows);
 
   const sizesByCategory = groupBy(sizes, 'category_id');
   const addonsByCategory = groupBy(addons, 'category_id');

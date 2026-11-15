@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-An order-ahead website for the Campus Eats menu: customers build an order, check out without paying, and track it by pickup code; staff work the orders from a kitchen board. Two separate npm projects (no workspace) plus MySQL. `PLAN.md` has the scope, API contract and roadmap.
+An order-ahead website for the Campus Eats menu: customers build an order, check out without paying, and track it by pickup code; staff work the orders from a kitchen board. Two separate npm projects (no workspace) plus PostgreSQL (Supabase in production). `PLAN.md` has the scope, API contract and roadmap.
 
 ## Commands
 
@@ -27,11 +27,11 @@ npm run lint
 npx tsc --noEmit
 ```
 
-Both must be running for the site to work, and MySQL must be up. Config is in `backend/.env` (DB credentials, `TAX_RATE`, `ADMIN_TOKEN`, `CORS_ORIGIN`) and `frontend/.env.local` (`NEXT_PUBLIC_API_URL`). Schema changes are not migrated: `schema.sql` is `CREATE TABLE IF NOT EXISTS`, so altering an existing table means dropping it or writing the `ALTER` by hand.
+Both must be running for the site to work, and the Postgres database must be reachable. Config is in `backend/.env` (DB credentials, `TAX_RATE`, `ADMIN_TOKEN`, `CORS_ORIGIN`) and `frontend/.env.local` (`NEXT_PUBLIC_API_URL`). Schema changes are not migrated: `schema.sql` is `CREATE TABLE IF NOT EXISTS`, so altering an existing table means dropping it or writing the `ALTER` by hand.
 
 ## Architecture
 
-**Data flow.** The frontend never touches MySQL. Server components and client components both call the Express API through `frontend/src/lib/api.ts`. The menu is fetched uncached inside `<Suspense>` on each request (see "Next.js 16" below), so price or availability changes need no rebuild.
+**Data flow.** The frontend never touches the database. Server components and client components both call the Express API through `frontend/src/lib/api.ts`. The menu is fetched uncached inside `<Suspense>` on each request (see "Next.js 16" below), so price or availability changes need no rebuild.
 
 **Pricing model (the core idea).** An item is priced in exactly one of three ways, and `backend/src/services/pricing.js#buildOptions` flattens all three into a uniform `options: [{ key, label, priceCents }]` list that the frontend renders without knowing the difference:
 

@@ -36,33 +36,37 @@ export async function createOrder({ customer, notes, items }) {
   const code = await withTransaction(async (conn) => {
     let orderId;
     let orderCode;
+    // A code collision is astronomically unlikely; retry a few times anyway.
+    // ON CONFLICT (rather than catching the error) keeps the transaction usable.
     for (let attempt = 0; orderId === undefined; attempt += 1) {
+      if (attempt >= 5) throw new Error('Could not generate a unique order code');
       orderCode = newOrderCode();
-      try {
-        const [result] = await conn.query(
-          `INSERT INTO orders
-             (code, customer_name, customer_phone, customer_email, notes, subtotal_cents, tax_cents, total_cents)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [orderCode, customer.name, customer.phone, customer.email || null, notes || null, subtotalCents, taxCents, totalCents],
-        );
-        orderId = result.insertId;
-      } catch (err) {
-        // A code collision is astronomically unlikely; retry a few times anyway.
-        if (err.code !== 'ER_DUP_ENTRY' || attempt >= 4) throw err;
-      }
+      const { rows } = await conn.query(
+        `INSERT INTO orders
+           (code, customer_name, customer_phone, customer_email, notes, subtotal_cents, tax_cents, total_cents)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (code) DO NOTHING
+         RETURNING id`,
+        [orderCode, customer.name, customer.phone, customer.email || null, notes || null, subtotalCents, taxCents, totalCents],
+      );
+      orderId = rows[0]?.id;
     }
 
     for (const line of lines) {
-      const [result] = await conn.query(
+      const { rows } = await conn.query(
         `INSERT INTO order_items
            (order_id, item_id, item_code, item_name, category_name, option_name, unit_price_cents, quantity, line_total_cents, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         RETURNING id`,
         [orderId, line.itemId, line.itemCode, line.itemName, line.categoryName, line.optionName, line.unitPriceCents, line.quantity, line.lineTotalCents, line.notes],
       );
       if (line.addons.length > 0) {
-        await conn.query('INSERT INTO order_item_addons (order_item_id, addon_name, price_cents) VALUES ?', [
-          line.addons.map((a) => [result.insertId, a.name, a.priceCents]),
-        ]);
+        await conn.query(
+          `INSERT INTO order_item_addons (order_item_id, addon_name, price_cents)
+           SELECT $1::int, addon.name, addon.price_cents
+           FROM unnest($2::text[], $3::int[]) AS addon (name, price_cents)`,
+          [rows[0].id, line.addons.map((a) => a.name), line.addons.map((a) => a.priceCents)],
+        );
       }
     }
     return orderCode;
@@ -72,31 +76,30 @@ export async function createOrder({ customer, notes, items }) {
 }
 
 async function loadOrders(where, params) {
-  const [orders] = await pool.query(
-    `SELECT id, code, customer_name AS customerName, customer_phone AS customerPhone,
-            customer_email AS customerEmail, notes, status,
-            subtotal_cents AS subtotalCents, tax_cents AS taxCents, total_cents AS totalCents,
-            created_at AS createdAt, updated_at AS updatedAt
+  const { rows: orders } = await pool.query(
+    `SELECT id, code, customer_name AS "customerName", customer_phone AS "customerPhone",
+            customer_email AS "customerEmail", notes, status,
+            subtotal_cents AS "subtotalCents", tax_cents AS "taxCents", total_cents AS "totalCents",
+            created_at AS "createdAt", updated_at AS "updatedAt"
      FROM orders ${where}`,
     params,
   );
   if (orders.length === 0) return [];
 
-  const orderIds = orders.map((o) => o.id);
-  const [lines] = await pool.query(
-    `SELECT id, order_id AS orderId, item_code AS code, item_name AS name, category_name AS categoryName,
-            option_name AS optionName,
-            unit_price_cents AS unitPriceCents, quantity, line_total_cents AS lineTotalCents, notes
-     FROM order_items WHERE order_id IN (?) ORDER BY id`,
-    [orderIds],
+  const { rows: lines } = await pool.query(
+    `SELECT id, order_id AS "orderId", item_code AS code, item_name AS name, category_name AS "categoryName",
+            option_name AS "optionName",
+            unit_price_cents AS "unitPriceCents", quantity, line_total_cents AS "lineTotalCents", notes
+     FROM order_items WHERE order_id = ANY($1) ORDER BY id`,
+    [orders.map((o) => o.id)],
   );
-  const [addons] = lines.length
+  const { rows: addons } = lines.length
     ? await pool.query(
-        `SELECT order_item_id AS lineId, addon_name AS name, price_cents AS priceCents
-         FROM order_item_addons WHERE order_item_id IN (?) ORDER BY id`,
+        `SELECT order_item_id AS "lineId", addon_name AS name, price_cents AS "priceCents"
+         FROM order_item_addons WHERE order_item_id = ANY($1) ORDER BY id`,
         [lines.map((l) => l.id)],
       )
-    : [[]];
+    : { rows: [] };
 
   return orders.map(({ id, ...order }) => ({
     ...order,
@@ -110,7 +113,7 @@ async function loadOrders(where, params) {
 }
 
 export async function getOrderByCode(code) {
-  const [order] = await loadOrders('WHERE code = ?', [code]);
+  const [order] = await loadOrders('WHERE code = $1', [code]);
   return order ?? null;
 }
 
@@ -122,13 +125,13 @@ export function toPublicOrder({ customerPhone, customerEmail, ...order }) {
 
 export function listOrders({ scope }) {
   if (scope === 'active') {
-    return loadOrders('WHERE status IN (?) ORDER BY created_at ASC', [ACTIVE_STATUSES]);
+    return loadOrders('WHERE status = ANY($1) ORDER BY created_at ASC', [ACTIVE_STATUSES]);
   }
   return loadOrders('ORDER BY created_at DESC LIMIT 100', []);
 }
 
 export async function setOrderStatus(code, status) {
-  const [result] = await pool.query('UPDATE orders SET status = ? WHERE code = ?', [status, code]);
-  if (result.affectedRows === 0) throw new HttpError(404, 'Order not found');
+  const result = await pool.query('UPDATE orders SET status = $1, updated_at = now() WHERE code = $2', [status, code]);
+  if (result.rowCount === 0) throw new HttpError(404, 'Order not found');
   return getOrderByCode(code);
 }

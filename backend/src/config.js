@@ -2,6 +2,9 @@ import 'dotenv/config';
 
 const env = process.env;
 
+const dbHost = env.DB_HOST ?? '127.0.0.1';
+const isLocalDb = ['127.0.0.1', 'localhost', '::1'].includes(dbHost);
+
 export const config = {
   port: Number(env.PORT ?? 4000),
   // Comma-separated list of origins allowed to call the API from a browser.
@@ -11,10 +14,13 @@ export const config = {
   // Passcode for the kitchen endpoints. They are disabled while this is empty.
   adminToken: env.ADMIN_TOKEN ?? '',
   db: {
-    host: env.DB_HOST ?? '127.0.0.1',
-    port: Number(env.DB_PORT ?? 3306),
-    user: env.DB_USER ?? 'root',
+    host: dbHost,
+    port: Number(env.DB_PORT ?? 5432),
+    user: env.DB_USER ?? 'postgres',
     password: env.DB_PASSWORD ?? '',
     database: env.DB_NAME ?? 'campus_eats',
+    // Hosted Postgres (Supabase) is reached over TLS. Its pooler presents a
+    // certificate signed by Supabase's own CA, so the chain is not verified.
+    ssl: isLocalDb ? false : { rejectUnauthorized: false },
   },
 };

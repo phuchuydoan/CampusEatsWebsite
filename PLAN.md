@@ -7,8 +7,8 @@ A website where students order from the Campus Eats menu ahead of time, then pic
 | Layer | Choice | Where |
 |-------|--------|-------|
 | Frontend | Next.js 16 (App Router, React 19, TypeScript, Tailwind CSS 4) | `frontend/` |
-| Backend | Node.js + Express 5, `mysql2`, `zod` validation | `backend/` |
-| Database | MySQL (`campus_eats`) | `backend/db/schema.sql` |
+| Backend | Node.js + Express 5, `pg`, `zod` validation | `backend/` |
+| Database | PostgreSQL (Supabase in production) | `backend/db/schema.sql` |
 | Images | Generated with Higgsfield AI (hero + one per category) | `frontend/public/images/` |
 
 The browser talks only to the Express API. The Next.js server also calls the API to render the menu.
@@ -54,7 +54,7 @@ The server always recomputes prices from the database; prices sent by a client a
 5. **Menu admin**: edit prices, mark items sold out, upload photos from the kitchen screen (the `is_available` column and API support already exist).
 6. **Notifications**: text or email when the order is ready.
 7. **Per-item photos**: generate with Higgsfield for the best sellers.
-8. **Deploy**: frontend on Vercel, API and MySQL on a host such as Railway; proper staff accounts instead of one shared passcode.
+8. **Deploy**: frontend on Vercel, API on Render, PostgreSQL on Supabase; proper staff accounts instead of one shared passcode.
 
 ## Open questions for the store
 
